@@ -53,7 +53,6 @@ func main() {
             values[0] = value_range[i]
             values[1] = value_range[i+1]
             go create_keys(base,pct_count[i],values)
-            time.Sleep(100 * time.Millisecond)
         }
     case operation == "get":
         fmt.Println("Inside get")
@@ -65,6 +64,7 @@ func main() {
         fmt.Println("Inside delete")
         handler(delete_values)
     }
+    time.Sleep(100 * time.Millisecond)
     // SET the value "bar" to the key "foo" with zero TTL
     // returns a: *store.Response
     
@@ -158,7 +158,7 @@ func handler(fn actions){
     base := 0
     for i:=0;i<threads;i++{
         go fn(base,per_thread)
-        time.Sleep(100 * time.Millisecond)
+        //time.Sleep(100 * time.Millisecond)
     }
 }
 
