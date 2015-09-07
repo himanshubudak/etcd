@@ -33,9 +33,9 @@ var keycount int
 var operation_count int
 var threads int
 var client *etcd.Client
-var pct [5]int
-var pct_count [5]int
-var value_range [6]int
+var pct []int
+var pct_count []int
+var value_range []int
 var pidetcd string
 var start time.Time
 var f *os.File
@@ -55,8 +55,9 @@ func main() {
             Log_File string
         }
         Section_Params struct {
-            Pct []string
-            Value_Range []string
+            Threads int
+            Pct string
+            Value_Range string
         }
     }{}
     
@@ -69,19 +70,43 @@ func main() {
     }
     
     // Reading from config file
+    ////////////////////////////////////////////////////////
     etcdhost := cfg.Section_Args.Etcdhost
     etcdport := cfg.Section_Args.Etcdport
     operation = cfg.Section_Args.Operation
     keycount = int(toInt(cfg.Section_Args.Keycount,10,64))
     operation_count = int(toInt(cfg.Section_Args.Operation_Count,10,64))
     log_file := cfg.Section_Args.Log_File
-    
+
+    // The Distribution of keys
+    percents := cfg.Section_Params.Pct
+    temp := strings.Split(percents,",")
+    pct = make([]int,len(temp))
+    pct_count = make([]int,len(temp))
+    for i:=0;i<len(temp);i++ {
+        pct[i] = int(toInt(temp[i],10,64))
+        pct_count[i] = pct[i] * keycount / 100
+    }
+    // Percentage distribution of key-values
+    value_r := cfg.Section_Params.Value_Range
+    temp = strings.Split(value_r,",")
+    value_range = make([]int,len(temp))
+    for i:=0;i<len(temp);i++ {
+        value_range[i] = int(toInt(temp[i],10,64))
+    }
+    //Maximum threads
+    threads = cfg.Section_Params.Threads
+    fmt.Println("!!!!@@@@@@@@@@#######",threads)
+    ///////////////////////////////////////////////////////////
+
+    // Getting Memory Info for etcd instance
     pidtemp, _ := exec.Command("pidof","etcd").Output()
     pidetcd = string(pidtemp)
     pidetcd = strings.TrimSpace(pidetcd)
     etcdmem_s, _  := strconv.Atoi(getMemUse(pidetcd))
     fmt.Println("This is the current memory usage by etcd before execution: " + getMemUse(pidetcd))
 
+    // Creating a new client for handling requests
     var machines = []string{"http://"+etcdhost+":"+etcdport}
     client =  etcd.NewClient(machines)
     
@@ -90,31 +115,12 @@ func main() {
     if err != nil {
         log.Fatalf("error opening file: %v", err)
     }
-    
+    // Log file set
     log.SetOutput(f)
     log.Println("Starting #####")
     log.Println("Keycount = %s , operation_count = %s",cfg.Section_Args.Keycount,cfg.Section_Args.Operation_Count)
 
     
-
-    
-
-
-
-
-    // Percentage distribution of key-values
-    pct_temp := [5]int{5, 74, 10, 10, 1}
-    pct = pct_temp
-    value_range_temp := [6]int{0, 256, 512, 1024, 8192, 204800}
-    value_range = value_range_temp
-
-    var pct_count [5] int
-    for i:=0;i<5;i++{
-        pct_count[i] = pct[i] * keycount / 100
-    }
-
-    // Number of threads
-    threads = 5
 
     // Keep track of the goroutines
     wg.Add(len(pct))
