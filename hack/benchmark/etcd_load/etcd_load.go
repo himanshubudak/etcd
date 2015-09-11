@@ -13,15 +13,18 @@ import (
     "math/big"
     "log"
     "code.google.com/p/gcfg"
+    "code.google.com/p/go.crypto/ssh"
+    "io/ioutil"
+    "bytes"
 )
 
 /*
 Declarations :::: 
-    actions : for passing otherfunctions as arguments to handler function
+    actions   : for passing otherfunctions as arguments to handler function
     operation : which operation to perform
-    keycount : number of keys to be added, retrieved, deleted or updated
-    threads : number of total threads
-    pct : each entry represents percentage of values lying in (value_range[i],value_range[i+1]) 
+    keycount  : number of keys to be added, retrieved, deleted or updated
+    threads   : number of total threads
+    pct       : each entry represents percentage of values lying in (value_range[i],value_range[i+1]) 
 */
 
 type actions func(int,int)
@@ -40,7 +43,19 @@ var pidetcd string
 var start time.Time
 var f *os.File
 var err error
+var key ssh.Signer
+var config *ssh.ClientConfig
+var ssh_client *ssh.Client
+var session *ssh.Session
+var pidetcd_s string
+var etcdmem_s int
+var etcdmem_e int
+///////////////////
+/// TESTING
+///////////////////
+//var thread_arr []int
 
+//////////////////
 
 func main() {
 
@@ -58,13 +73,17 @@ func main() {
             Threads int
             Pct string
             Value_Range string
+            Remote_Flag bool
+            Remote_Host string
+            Ssh_Port string
+            Remote_Host_User string
         }
     }{}
     
     // Config File
-    filename := os.Args[1]
+    conf_file := os.Args[1]
 
-    err := gcfg.ReadFileInto(&cfg, filename)
+    err := gcfg.ReadFileInto(&cfg, conf_file)
     if err != nil {
         log.Fatalf("Failed to parse gcfg data: %s", err)
     }
@@ -96,15 +115,61 @@ func main() {
     }
     //Maximum threads
     threads = cfg.Section_Params.Threads
-    fmt.Println("!!!!@@@@@@@@@@#######",threads)
-    ///////////////////////////////////////////////////////////
+
+    remote_flag := cfg.Section_Params.Remote_Flag
+    remote_host := cfg.Section_Params.Remote_Host
+    ssh_port := cfg.Section_Params.Ssh_Port
+    remote_host_user := cfg.Section_Params.Remote_Host_User
+    if remote_flag {
+        etcdhost = remote_host
+        t_key, _ := getKeyFile()
+        if  err !=nil {
+            panic(err)
+        }
+        key = t_key
+        config := &ssh.ClientConfig{
+            User: remote_host_user,
+            Auth: []ssh.AuthMethod{
+            ssh.PublicKeys(key),
+            },
+        }
+
+        t_client,_ := ssh.Dial("tcp", remote_host+":"+ssh_port, config)
+        if err != nil {
+            panic("Failed to dial: " + err.Error())
+        }
+        ssh_client = t_client
+
+    }
+
 
     // Getting Memory Info for etcd instance
-    pidtemp, _ := exec.Command("pidof","etcd").Output()
-    pidetcd = string(pidtemp)
-    pidetcd = strings.TrimSpace(pidetcd)
-    etcdmem_s, _  := strconv.Atoi(getMemUse(pidetcd))
-    fmt.Println("This is the current memory usage by etcd before execution: " + getMemUse(pidetcd))
+    if remote_flag {
+        var bits bytes.Buffer
+        mem_cmd := "pmap -x $(pidof etcd) | tail -n1 | awk '{print $4}'"
+        session, err := ssh_client.NewSession()
+        if err != nil {
+            panic("Failed to create session: " + err.Error())
+        }
+        defer session.Close()
+        session.Stdout = &bits
+        if err := session.Run(mem_cmd); err != nil {
+            panic("Failed to run: " + err.Error())
+        }
+
+        pidetcd_s = bits.String()
+        pidetcd_s = strings.TrimSpace(pidetcd_s)
+        etcdmem_i, _ := strconv.Atoi(pidetcd_s)
+        etcdmem_s = etcdmem_i
+    } else{
+        pidtemp, _ := exec.Command("pidof","etcd").Output()
+        pidetcd = string(pidtemp)
+        pidetcd = strings.TrimSpace(pidetcd)
+        pidetcd_s = getMemUse(pidetcd)
+        etcdmem_i, _  := strconv.Atoi(pidetcd_s)
+        etcdmem_s = etcdmem_i
+    }
+    fmt.Println("This is the current memory usage by etcd before execution: " + pidetcd_s)
 
     // Creating a new client for handling requests
     var machines = []string{"http://"+etcdhost+":"+etcdport}
@@ -149,8 +214,28 @@ func main() {
         handler(delete_values)
         wg.Wait()
     }
-    etcdmem_e, _ := strconv.Atoi(getMemUse(pidetcd))
-    fmt.Println("This is the current memory usage by etcd after execution: " + getMemUse(pidetcd))
+    if remote_flag {
+        var bits bytes.Buffer
+        mem_cmd := "pmap -x $(pidof etcd) | tail -n1 | awk '{print $4}'"
+        session, err := ssh_client.NewSession()
+        if err != nil {
+            panic("Failed to create session: " + err.Error())
+        }
+        defer session.Close()
+        session.Stdout = &bits
+        if err := session.Run(mem_cmd); err != nil {
+            panic("Failed to run: " + err.Error())
+        }
+        pidetcd_s = bits.String()
+        pidetcd_s = strings.TrimSpace(pidetcd_s)
+        etcdmem_i,_ := strconv.Atoi(pidetcd_s)
+        etcdmem_e = etcdmem_i
+    } else {
+        pidetcd_s = getMemUse(pidetcd)
+        etcdmem_i, _ := strconv.Atoi(pidetcd_s)
+        etcdmem_e = etcdmem_i
+    }
+    fmt.Println("This is the current memory usage by etcd after execution: " + pidetcd_s)
     fmt.Println("Difference := " + strconv.Itoa(etcdmem_e - etcdmem_s))
     log.Println("Difference in memory use, after and before load testing := " + strconv.Itoa(etcdmem_e - etcdmem_s))
     defer f.Close()
@@ -267,3 +352,16 @@ func timeTrack(start time.Time, name string) {
     log.Println("key %s took %s", name, elapsed)
 }
 
+func getKeyFile() (key ssh.Signer, err error){
+    //fmt.Println("getkey file funciton")
+    file := os.Getenv("HOME") + "/.ssh/id_rsa"
+    buf, err := ioutil.ReadFile(file)
+    if err != nil {
+        return
+    }
+    key, err = ssh.ParsePrivateKey(buf)
+    if err != nil {
+        return
+     }
+    return
+}
