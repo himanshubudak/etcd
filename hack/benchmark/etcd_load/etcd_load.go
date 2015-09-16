@@ -16,6 +16,7 @@ import (
     "code.google.com/p/go.crypto/ssh"
     "io/ioutil"
     "bytes"
+    "flag"
 )
 
 /*
@@ -29,35 +30,53 @@ Declarations ::::
 
 type actions func(int,int)
 
-var n int32
-var wg sync.WaitGroup
-var operation string
-var keycount int
-var operation_count int
-var threads int
-var client *etcd.Client
-var pct []int
-var pct_count []int
-var value_range []int
-var pidetcd string
-var start time.Time
-var f *os.File
-var err error
-var key ssh.Signer
-var config *ssh.ClientConfig
-var ssh_client *ssh.Client
-var session *ssh.Session
-var pidetcd_s string
-var etcdmem_s int
-var etcdmem_e int
-///////////////////
-/// TESTING
-///////////////////
-//var thread_arr []int
+var (
+    wg sync.WaitGroup
+    operation, pidetcd, pidetcd_s, conf_file string
+    keycount, operation_count, threads, etcdmem_s, etcdmem_e int
+    pct, pct_count, value_range []int
+    client *etcd.Client
+    start time.Time
+    f *os.File
+    err error
+    key ssh.Signer
+    config *ssh.ClientConfig
+    ssh_client *ssh.Client
+    session *ssh.Session
+    mem_flag bool
+)
 
-//////////////////
+//flag variables
+var (
+    fhost, fport, foperation, flog_file, fcfg_file *string
+    fkeycount, foperation_count *int
+    fremote_flag, fmem_flag, fhelp *bool
+)
+
+ func init() {
+    // All the defaults are from the etcd_load.cfg default
+    fhelp = flag.Bool("help", false, "shows how to use flags")    
+    fhost = flag.String("h", "null", "etcd instance address."+
+                        "Default=127.0.0.1 from config file")
+    fport = flag.String("p", "null", 
+                        "port on which etcd is running. Defalt=4001")
+    foperation = flag.String("o", "null", 
+                        "operation - create/delete/get/update. Default:create")
+    fkeycount = flag.Int("k",-1,"number of keys involved in operation,"+
+                        "useful for create. Default:100")
+    foperation_count = flag.Int("oc",-1,"number of operations to be performed,"+
+                        " Default:200")
+    flog_file = flag.String("log","null", "logfile name, default : log")
+    fremote_flag = flag.Bool("remote",false," Must be set true if etcd "+
+                        "instance is remote. Default=false")
+    fmem_flag = flag.Bool("mem",false,"When true, memory info is shown."+
+                        " Default=false")
+    fcfg_file = flag.String("c","null","Input the cfg file. Required")
+ }
 
 func main() {
+    //parsing commandline flags
+    flag.Parse()
 
     // Configuration Structure
     cfg := struct {
@@ -68,26 +87,34 @@ func main() {
             Keycount string
             Operation_Count string
             Log_File string
-        }
-        Section_Params struct {
             Threads int
             Pct string
             Value_Range string
             Remote_Flag bool
-            Remote_Host string
             Ssh_Port string
             Remote_Host_User string
         }
     }{}
     
     // Config File
-    conf_file := os.Args[1]
-
+    if *fhelp {
+        flag.Usage()
+        return
+    }
+    if *fcfg_file != "null"{
+        conf_file = *fcfg_file
+    } else
+    {
+        flag.Usage()
+        fmt.Println("Please input the cfg file")
+        return
+    }
     err := gcfg.ReadFileInto(&cfg, conf_file)
     if err != nil {
         log.Fatalf("Failed to parse gcfg data: %s", err)
     }
-    
+
+
     // Reading from config file
     ////////////////////////////////////////////////////////
     etcdhost := cfg.Section_Args.Etcdhost
@@ -98,7 +125,7 @@ func main() {
     log_file := cfg.Section_Args.Log_File
 
     // The Distribution of keys
-    percents := cfg.Section_Params.Pct
+    percents := cfg.Section_Args.Pct
     temp := strings.Split(percents,",")
     pct = make([]int,len(temp))
     pct_count = make([]int,len(temp))
@@ -107,26 +134,51 @@ func main() {
         pct_count[i] = pct[i] * keycount / 100
     }
     // Percentage distribution of key-values
-    value_r := cfg.Section_Params.Value_Range
+    value_r := cfg.Section_Args.Value_Range
     temp = strings.Split(value_r,",")
     value_range = make([]int,len(temp))
     for i:=0;i<len(temp);i++ {
         value_range[i] = int(toInt(temp[i],10,64))
     }
     //Maximum threads
-    threads = cfg.Section_Params.Threads
+    threads = cfg.Section_Args.Threads
 
-    remote_flag := cfg.Section_Params.Remote_Flag
-    remote_host := cfg.Section_Params.Remote_Host
-    ssh_port := cfg.Section_Params.Ssh_Port
-    remote_host_user := cfg.Section_Params.Remote_Host_User
-    if remote_flag {
-        etcdhost = remote_host
+    remote_flag := cfg.Section_Args.Remote_Flag
+    remote_host := cfg.Section_Args.Etcdhost
+    ssh_port := cfg.Section_Args.Ssh_Port
+    remote_host_user := cfg.Section_Args.Remote_Host_User
+
+
+    // Flag Handling
+    if *fhost != "null"{
+        etcdhost=*fhost
+        remote_host=etcdhost
+    }
+    if *fport != "null"{
+        etcdport=*fport
+    }
+    if *foperation != "null" {
+        operation=*foperation
+    }
+    if *fkeycount != -1 {
+        keycount = *fkeycount
+    }
+    if *foperation_count != -1 {
+        operation_count = *foperation_count
+    }
+    if *flog_file != "null" {
+        log_file = *flog_file
+    }
+    remote_flag = *fremote_flag
+    mem_flag = *fmem_flag
+
+    if remote_flag && mem_flag {
         t_key, _ := getKeyFile()
         if  err !=nil {
             panic(err)
         }
         key = t_key
+
         config := &ssh.ClientConfig{
             User: remote_host_user,
             Auth: []ssh.AuthMethod{
@@ -134,17 +186,16 @@ func main() {
             },
         }
 
-        t_client,_ := ssh.Dial("tcp", remote_host+":"+ssh_port, config)
+        t_client,err := ssh.Dial("tcp", remote_host+":"+ssh_port, config)
         if err != nil {
             panic("Failed to dial: " + err.Error())
         }
         ssh_client = t_client
-
     }
 
 
     // Getting Memory Info for etcd instance
-    if remote_flag {
+    if remote_flag && mem_flag {
         var bits bytes.Buffer
         mem_cmd := "pmap -x $(pidof etcd) | tail -n1 | awk '{print $4}'"
         session, err := ssh_client.NewSession()
@@ -161,7 +212,7 @@ func main() {
         pidetcd_s = strings.TrimSpace(pidetcd_s)
         etcdmem_i, _ := strconv.Atoi(pidetcd_s)
         etcdmem_s = etcdmem_i
-    } else{
+    } else if mem_flag {
         pidtemp, _ := exec.Command("pidof","etcd").Output()
         pidetcd = string(pidtemp)
         pidetcd = strings.TrimSpace(pidetcd)
@@ -169,12 +220,14 @@ func main() {
         etcdmem_i, _  := strconv.Atoi(pidetcd_s)
         etcdmem_s = etcdmem_i
     }
-    fmt.Println("This is the current memory usage by etcd before execution: " + pidetcd_s)
-
+    if mem_flag {
+        fmt.Println("Memory usage by etcd before requests: " + pidetcd_s + " KB")
+    }
     // Creating a new client for handling requests
     var machines = []string{"http://"+etcdhost+":"+etcdport}
     client =  etcd.NewClient(machines)
-    
+
+
     //Log File
     f, err = os.OpenFile(log_file, os.O_RDWR | os.O_CREATE , 0666)
     if err != nil {
@@ -183,7 +236,7 @@ func main() {
     // Log file set
     log.SetOutput(f)
     log.Println("Starting #####")
-    log.Println("Keycount = %s , operation_count = %s",cfg.Section_Args.Keycount,cfg.Section_Args.Operation_Count)
+    log.Println("Keycount, operation_count =",keycount,operation_count)
 
     
 
@@ -214,7 +267,7 @@ func main() {
         handler(delete_values)
         wg.Wait()
     }
-    if remote_flag {
+    if remote_flag && mem_flag {
         var bits bytes.Buffer
         mem_cmd := "pmap -x $(pidof etcd) | tail -n1 | awk '{print $4}'"
         session, err := ssh_client.NewSession()
@@ -230,14 +283,16 @@ func main() {
         pidetcd_s = strings.TrimSpace(pidetcd_s)
         etcdmem_i,_ := strconv.Atoi(pidetcd_s)
         etcdmem_e = etcdmem_i
-    } else {
+    } else if mem_flag{
         pidetcd_s = getMemUse(pidetcd)
         etcdmem_i, _ := strconv.Atoi(pidetcd_s)
         etcdmem_e = etcdmem_i
     }
-    fmt.Println("This is the current memory usage by etcd after execution: " + pidetcd_s)
-    fmt.Println("Difference := " + strconv.Itoa(etcdmem_e - etcdmem_s))
-    log.Println("Difference in memory use, after and before load testing := " + strconv.Itoa(etcdmem_e - etcdmem_s))
+    if mem_flag {
+        fmt.Println("This is the current memory usage by etcd after execution: " + pidetcd_s + " KB")
+        fmt.Println("Difference := " + strconv.Itoa(etcdmem_e - etcdmem_s) + " KB")
+        log.Println("Difference in memory use, after and before load testing := " + strconv.Itoa(etcdmem_e - etcdmem_s))
+    }
     defer f.Close()
 }
 
@@ -257,7 +312,6 @@ func toString(i int) string {
 func get_values(base int, per_thread int){
     var key int
     limit := base + (keycount / threads)
-    fmt.Println("limit is = ",strconv.Itoa(limit))
     for i:=0;i<per_thread;i++{
         m,_ := rand.Int(rand.Reader,big.NewInt(int64(limit-base)))
         key = int(m.Int64()) + base
@@ -279,6 +333,11 @@ func create_keys(base int, count int, r [2]int){
         value := RandStringBytesRmndr(r1)
         start = time.Now()
         result, _ := client.Set(toString(key),value,1000)
+        /////////////////////
+
+        //fmt.Println(result)
+        
+        ////////////////////////////
         elapsed := time.Since(start)
         log.Println("key %s took %s", key, elapsed)
         _ = result
