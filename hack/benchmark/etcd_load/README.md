@@ -4,6 +4,29 @@ keys and values, which can be specified in the configuration file. You can
 configure many other parameters in the config file. See the sample config file 
 --"etcd_load.cfg" for more information
 
+Features include :
+ - Memory information
+  - gives the memory information about the running etcd instance -- before, 
+  	after and difference, when requests are made
+  -	To get this info, use the "-mem" flag while running the module
+  - Also, if the instance is running on a remote machine, then you need to use
+  	the "-remote" flag as well.
+ - Key value distribution
+  - This feature basically allows you to specify the distribution of the 
+  	key-values, that is how many keys lie in a particular value range, specified
+  	by "value-range" parameter under section : "section-args", in etcd_load.cfg
+  - See the "pct" parameter under the section :"section-args", in etcd_load.cfg
+ - Value range
+  - This allows you to specify value ranges, which will be used for the -- Key
+  	value distribution feature.
+  - Note : length (Value Range) = length (Key Value distribution) + 1
+ - There are other configuration options as well, like -- log-file, remote-flag,
+ 	remote-host-user, etcd. . Some of these can be specified using commandline 
+ 	flags as well, in which case the flags will override the cfg-file values. To
+ 	know more about them see the default config file -- "etcd_load.cfg" and for
+ 	help regarding flags, use
+ 		- go run etcd_load.go -h
+
 Before you proceed there are a few things that you might need to set up.
 
  - Make sure that the following packages are in your GOPATH. Set your 
@@ -24,6 +47,10 @@ Before you proceed there are a few things that you might need to set up.
 Now, to run etcd_load test, use the following steps
  - go build etcd_load.go report.go
  - ./etcd_load -c "default-config-file" --other-optional-flags
+ - Examples :
+ 	- ./etcd_load -c etcd_load.go -mem -remote -o create  [remote etcd instance]
+ 	- ./etcd_load -c etcd_load.go -h 10.10.10.1 -o create [remote etcd instance]
+ 	- ./etcd_load -c etcd_load.go -h 127.0.0.1 -o create  [local etcd instance]
 
 	Note that the "-c" flag is compulsory, that is you need to have a default 
 	config file that must be input using the -c flag
