@@ -222,7 +222,7 @@ func main() {
         etcdmem_s = etcdmem_i
     }
     if mem_flag {
-        fmt.Println("Memory usage by etcd before requests: " + pidetcd_s + " KB")
+        fmt.Println("Memory usage by etcd before requests: " + pidetcd_s +" KB")
     }
     // Creating a new client for handling requests
     var machines = []string{"http://"+etcdhost+":"+etcdport}
