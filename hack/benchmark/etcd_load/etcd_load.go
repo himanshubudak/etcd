@@ -44,6 +44,7 @@ var (
     ssh_client *ssh.Client
     session *ssh.Session
     mem_flag bool
+    results chan *result
 )
 
 //flag variables
@@ -238,6 +239,10 @@ func main() {
     log.Println("Starting #####")
     log.Println("Keycount, operation_count =",keycount,operation_count)
 
+
+    // Results : see report.go
+    n := operation_count
+    results = make(chan *result, n)
     
 
     // Keep track of the goroutines
@@ -248,24 +253,32 @@ func main() {
         log.Println("Operation : create")
         var values [2]int
         base := 0
+        start := time.Now()
         for i:=0;i<len(pct);i++{
             values[0] = value_range[i]
             values[1] = value_range[i+1]
             go create_keys(base,pct_count[i],values)
         }
         wg.Wait()
+        printReport(n, results, time.Now().Sub(start))
     case operation == "get":
+        start := time.Now()
         log.Println("Operation : get")
         handler(get_values)
         wg.Wait()
+        printReport(n, results, time.Now().Sub(start))
     case operation == "update":
+        start := time.Now()
         log.Println("Operation : update")
         handler(update_values)
         wg.Wait()
+        printReport(n, results, time.Now().Sub(start))
     case operation == "delete":
+        start := time.Now()
         log.Println("Operation : delete")
         handler(delete_values)
         wg.Wait()
+        printReport(n, results, time.Now().Sub(start))
     }
     if remote_flag && mem_flag {
         var bits bytes.Buffer
@@ -289,9 +302,10 @@ func main() {
         etcdmem_e = etcdmem_i
     }
     if mem_flag {
-        fmt.Println("This is the current memory usage by etcd after execution: " + pidetcd_s + " KB")
-        fmt.Println("Difference := " + strconv.Itoa(etcdmem_e - etcdmem_s) + " KB")
-        log.Println("Difference in memory use, after and before load testing := " + strconv.Itoa(etcdmem_e - etcdmem_s))
+        fmt.Println("Memory usage by etcd before requests: "+ pidetcd_s + " KB")
+        fmt.Println("Difference := "+ strconv.Itoa(etcdmem_e - etcdmem_s)+" KB")
+        log.Println("Difference in memory use, after and before load testing "+
+                    ":=" + strconv.Itoa(etcdmem_e - etcdmem_s))
     }
     defer f.Close()
 }
@@ -316,10 +330,19 @@ func get_values(base int, per_thread int){
         m,_ := rand.Int(rand.Reader,big.NewInt(int64(limit-base)))
         key = int(m.Int64()) + base
         start = time.Now()
-        result, _ := client.Get(toString(key),false,false)
+        _, err := client.Get(toString(key),false,false)
         elapsed := time.Since(start)
         log.Println("key %s took %s", key, elapsed)
-        fmt.Println(result)
+
+        //for reporting; see report.go
+        var errStr string
+        if err != nil {
+            errStr = err.Error()
+        }
+        results <- &result{
+            errStr:   errStr,
+            duration: elapsed,
+        }
     } 
     defer wg.Done()
 }
@@ -332,15 +355,20 @@ func create_keys(base int, count int, r [2]int){
         r1 := int(m.Int64()) + r[0]
         value := RandStringBytesRmndr(r1)
         start = time.Now()
-        result, _ := client.Set(toString(key),value,1000)
-        /////////////////////
-
-        //fmt.Println(result)
-        
-        ////////////////////////////
+        _, err := client.Set(toString(key),value,1000)
         elapsed := time.Since(start)
         log.Println("key %s took %s", key, elapsed)
-        _ = result
+        
+        //for reporting; see report.go
+        var errStr string
+        if err != nil {
+            errStr = err.Error()
+        }
+        results <- &result{
+            errStr:   errStr,
+            duration: elapsed,
+        }
+        
     }
     defer wg.Done()
 }
@@ -353,10 +381,19 @@ func update_values(base int, per_thread int){
         m,_ := rand.Int(rand.Reader,big.NewInt(int64(limit-base)))
         key = int(m.Int64()) + base
         start = time.Now()
-        result, _ := client.Set(toString(key),val,1000) 
+        _, err := client.Set(toString(key),val,1000) 
         elapsed := time.Since(start)
         log.Println("key %s took %s", key, elapsed)
-        fmt.Println(result)
+
+        //for reporting; see report.go
+        var errStr string
+        if err != nil {
+            errStr = err.Error()
+        }
+        results <- &result{
+            errStr:   errStr,
+            duration: elapsed,
+        }
     }
     defer wg.Done()
 }
@@ -368,10 +405,19 @@ func delete_values(base int, per_thread int){
         m,_ := rand.Int(rand.Reader,big.NewInt(int64(limit-base)))
         key = int(m.Int64()) + base
         start = time.Now()
-        result, _ := client.Delete(toString(key),false)
+        _, err := client.Delete(toString(key),false)
         elapsed := time.Since(start)
         log.Println("key %s took %s", key, elapsed)
-        fmt.Println(result)
+
+        //for reporting; see report.go
+        var errStr string
+        if err != nil {
+            errStr = err.Error()
+        }
+        results <- &result{
+            errStr:   errStr,
+            duration: elapsed,
+        }
     }
     defer wg.Done()
 }
