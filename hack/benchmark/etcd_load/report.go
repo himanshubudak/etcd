@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 // the file is borrowed from github.com/rakyll/boom/boomer/print.go
 
 package main
