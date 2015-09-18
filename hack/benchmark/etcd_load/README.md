@@ -56,8 +56,8 @@ Now, to run etcd_load test, use the following steps
 	config file that must be input using the -c flag
 	To know more about the flags :: do -- go run etcd_load.go -h
 
-You can find runtime details in the log file. 
-On the commandline the output looks like :
+You can find more runtime details in the log file. 
+The commandline the report looks like :
 **********************************************************************
 	Summary:
 	  Total:	2.8454 secs.
