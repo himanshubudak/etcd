@@ -48,9 +48,9 @@ Now, to run etcd_load test, use the following steps
  - go build etcd_load.go report.go
  - ./etcd_load -c "default-config-file" --other-optional-flags
  - Examples :
- 	- ./etcd_load -c etcd_load.go -mem -remote -o create             [remote etcd instance]
- 	- ./etcd_load -c etcd_load.go -h 10.10.10.1 -p 4001 -o create    [remote etcd instance]
- 	- ./etcd_load -c etcd_load.go -h 127.0.0.1 -o create             [local etcd instance]
+ 	- ./etcd_load -c etcd_load.go -mem -remote -o create            # [remote etcd instance]
+ 	- ./etcd_load -c etcd_load.go -h 10.10.10.1 -p 4001 -o create   # [remote etcd instance]
+ 	- ./etcd_load -c etcd_load.go -h 127.0.0.1 -o create            # [local etcd instance]
 
 	Note that the "-c" flag is compulsory, that is you need to have a default 
 	config file that must be input using the -c flag
